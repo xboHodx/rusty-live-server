@@ -136,9 +136,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
             // 清理过期的客户端
             inner.clients.retain(|ip, clients| {
-                clients.retain(|rid, client| {
+                clients.retain(|session_id, client| {
                     if client.is_expired() {
-                        tracing::debug!("移除过期客户端: (ip={}, rid={})", ip, rid);
+                        tracing::debug!("移除过期客户端: (ip={}, session_id={})", ip, session_id);
                         false
                     } else {
                         true

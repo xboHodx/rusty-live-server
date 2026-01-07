@@ -339,8 +339,7 @@ impl BannerDatabase {
     /// 最常见的问题类型，询问角色对应的游戏或游戏对应的角色
     fn character_game_question(&self, idx: usize) -> (String, String) {
         let banner = &self.banners[idx];
-        let mut rng = rand::thread_rng();
-
+        
         // 如果游戏或角色信息缺失，回退到发布者问题
         let (game, character) = match (&banner.game, &banner.character) {
             (Some(g), Some(c)) => (g, c),
@@ -348,10 +347,10 @@ impl BannerDatabase {
                 return self.publisher_question(idx);
             }
         };
-
+        
+        let mut rng = rand::thread_rng();
         // 随机选择：问角色 还是 问游戏
         let mode = rng.gen_range(0..2);
-
         if mode == 0 {
             // 问：某游戏里的哪个角色？
             (

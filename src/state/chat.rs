@@ -52,7 +52,7 @@ impl ChatEntry {
 
 /// 客户端身份信息
 ///
-/// 存储一个 (IP, rid) 对应的用户身份
+/// 存储一个 (IP, session_id) 对应的用户身份
 #[derive(Debug, Clone, Serialize)]
 pub struct ClientIdentity {
     /// 用户 ID
@@ -69,7 +69,7 @@ pub struct ClientIdentity {
 /// - `messages`: 按时间戳排序的消息列表
 /// - `name_map`: 已被占用的昵称集合（用于防止昵称重复）
 /// - `uid_map`: UID -> 昵称 的映射
-/// - `client_map`: 二层 HashMap，IP -> rid -> ClientIdentity
+/// - `client_map`: 二层 HashMap，IP -> session_id -> ClientIdentity
 /// - `ip_map`: UID -> IP 的映射（用于消息归属）
 /// - `next_uid`: 下一个可用的 UID 起始值
 /// - `dump_path`: 聊天记录转储目录路径
@@ -81,7 +81,7 @@ pub struct ChatDatabaseInner {
     pub name_map: HashSet<String>,
     /// UID -> 昵称 映射
     pub uid_map: HashMap<u32, String>,
-    /// 客户端映射：IP -> rid -> 身份信息
+    /// 客户端映射：IP -> session_id -> 身份信息
     pub client_map: HashMap<String, HashMap<String, ClientIdentity>>,
     /// UID -> IP 映射（用于显示消息来源）
     pub ip_map: HashMap<u32, String>,
@@ -107,7 +107,6 @@ impl ChatDatabaseInner {
             uid_map: HashMap::new(),
             client_map: HashMap::new(),
             ip_map: HashMap::new(),
-            // 彩蛋：UID 从随机位置开始
             next_uid: rng.gen_range(114514..1919810),
             dump_path,
         }
@@ -130,19 +129,19 @@ impl ChatDatabaseInner {
     ///
     /// ### 参数
     /// - `ip`: 发送者 IP 地址
-    /// - `rid`: 发送者请求 ID（会话 ID）
+    /// - `session_id`: 发送者会话 ID
     /// - `content`: 消息内容
     /// - `is_publisher`: 是否为主播发送
     ///
     /// ### 行为说明
     /// 1. 如果客户端不存在，自动创建匿名用户
     /// 2. 消息按时间戳插入到正确位置（保持有序）
-    pub fn add_entry(&mut self, ip: String, rid: String, content: String, is_publisher: bool) {
+    pub fn add_entry(&mut self, ip: String, session_id: String, content: String, is_publisher: bool) {
         // 获取当前时间戳（秒级精度）
         let stamp = Utc::now().timestamp_millis() as f64 / 1000.0;
 
         // 获取或创建客户端 UID
-        let uid = if let Some(client) = self.client_map.get(&ip).and_then(|m| m.get(&rid)) {
+        let uid = if let Some(client) = self.client_map.get(&ip).and_then(|m| m.get(&session_id)) {
             // 客户端已存在，使用其 UID
             client.uid
         } else {
@@ -152,7 +151,7 @@ impl ChatDatabaseInner {
             self.client_map
                 .entry(ip.clone())
                 .or_insert_with(HashMap::new)
-                .insert(rid.clone(), ClientIdentity { uid, name: None });
+                .insert(session_id.clone(), ClientIdentity { uid, name: None });
             self.ip_map.insert(uid, ip);
             uid
         };
@@ -171,20 +170,20 @@ impl ChatDatabaseInner {
     ///
     /// ### 参数
     /// - `ip`: 客户端 IP 地址
-    /// - `rid`: 客户端请求 ID
+    /// - `session_id`: 客户端会话 ID
     /// - `name`: 要设置的昵称
     ///
     /// ### 返回值
     /// - `true`: 昵称设置成功
     /// - `false`: 昵称已被占用或客户端已有昵称
-    pub fn set_client_name(&mut self, ip: &str, rid: &str, name: String) -> bool {
+    pub fn set_client_name(&mut self, ip: &str, session_id: &str, name: String) -> bool {
         // 检查昵称是否已被占用
         if self.name_map.contains(&name) {
             return false;
         }
 
         // 获取或创建客户端 UID
-        let uid = if let Some(client) = self.client_map.get(ip).and_then(|m| m.get(rid)) {
+        let uid = if let Some(client) = self.client_map.get(ip).and_then(|m| m.get(session_id)) {
             // 已存在的客户端
             if client.name.is_some() {
                 return false; // 已经有昵称了
@@ -197,7 +196,7 @@ impl ChatDatabaseInner {
             self.client_map
                 .entry(ip.to_string())
                 .or_insert_with(HashMap::new)
-                .insert(rid.to_string(), ClientIdentity {
+                .insert(session_id.to_string(), ClientIdentity {
                     uid,
                     name: Some(name.clone()),
                 });
@@ -210,7 +209,7 @@ impl ChatDatabaseInner {
         self.uid_map.insert(uid, name.clone());
 
         // 更新 client_map 中的昵称
-        if let Some(client) = self.client_map.get_mut(ip).and_then(|m| m.get_mut(rid)) {
+        if let Some(client) = self.client_map.get_mut(ip).and_then(|m| m.get_mut(session_id)) {
             client.name = Some(name);
         }
 
@@ -221,14 +220,14 @@ impl ChatDatabaseInner {
     ///
     /// ### 参数
     /// - `ip`: 客户端 IP 地址
-    /// - `rid`: 客户端请求 ID
+    /// - `session_id`: 客户端会话 ID
     ///
     /// ### 返回值
     /// 返回客户端昵称（如果已设置）
-    pub fn get_client_name(&self, ip: &str, rid: &str) -> Option<String> {
+    pub fn get_client_name(&self, ip: &str, session_id: &str) -> Option<String> {
         self.client_map
             .get(ip)?
-            .get(rid)
+            .get(session_id)
             .and_then(|c| c.name.clone())
     }
 

@@ -12,8 +12,7 @@ pub mod chat;   // 聊天室状态管理
 pub mod banner; // 题库状态管理
 
 // 导出公共类型，供其他模块使用
-pub use srs::{SrsDatabase, ClientStatus, StreamerStatus};  // SRS 数据库和状态枚举
-pub use chat::{ChatDatabaseInner, ChatEntry};               // 聊天室数据库和消息条目
+pub use srs::{ClientStatus};  // SRS 数据库和状态枚举
 pub use banner::BannerDatabase;                              // 题库数据库
 
 // 导入依赖

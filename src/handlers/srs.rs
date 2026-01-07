@@ -45,7 +45,7 @@ pub struct SrsCallbackRequest {
     pub app: String,
     /// 流名称（如 "stream_name"）
     pub stream: String,
-    /// 查询参数字符串（包含 secret, rid 等信息）
+    /// 查询参数字符串（包含 secret, session_id 等信息）
     pub param: String,
     /// TC URL（未使用，保留以兼容 SRS 协议）
     #[serde(rename = "tcUrl", default)]
@@ -208,18 +208,18 @@ async fn handle_on_play(
 ) -> Response {
     // 解析查询参数
     let queries = parse_param(&payload.param);
-    let rid = queries.get("rid").cloned().unwrap_or_default();
+    let session_id = queries.get("rid").cloned().unwrap_or_default();
 
     let srs_db = state.srs_db.read();
 
     // 检查客户端是否已注册
-    if !srs_db.has_client(&payload.ip, &rid) {
+    if !srs_db.has_client(&payload.ip, &session_id) {
         tracing::debug!("SRS 回调拒绝: 客户端未注册");
         return srs_forbidden_response();
     }
 
     // 检查客户端状态
-    let client_status = srs_db.get_client_status(&payload.ip, &rid);
+    let client_status = srs_db.get_client_status(&payload.ip, &session_id);
     drop(srs_db);
 
     match client_status {
@@ -233,7 +233,7 @@ async fn handle_on_play(
 
     // 更新客户端状态为 Playing
     let mut srs_db = state.srs_db.write();
-    srs_db.update_client_activity(&payload.ip, &rid, ClientStatus::Playing);
+    srs_db.update_client_activity(&payload.ip, &session_id, ClientStatus::Playing);
 
     srs_success_response()
 }
@@ -266,13 +266,13 @@ async fn handle_on_stop(
 ) -> Response {
     // 解析查询参数
     let queries = parse_param(&payload.param);
-    let rid = queries.get("rid").cloned();
+    let session_id = queries.get("rid").cloned();
 
     let mut srs_db = state.srs_db.write();
 
     // 如果客户端存在，更新状态为 Resting
-    if rid.is_some() && srs_db.has_client(&payload.ip, rid.as_deref().unwrap_or("")) {
-        srs_db.update_client_activity(&payload.ip, rid.as_deref().unwrap_or(""), ClientStatus::Resting);
+    if session_id.is_some() && srs_db.has_client(&payload.ip, session_id.as_deref().unwrap_or("")) {
+        srs_db.update_client_activity(&payload.ip, session_id.as_deref().unwrap_or(""), ClientStatus::Resting);
     }
 
     srs_success_response()

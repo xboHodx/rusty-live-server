@@ -27,8 +27,8 @@ use std::sync::Arc;
 /// 客户端通过 URL 参数传递会话标识
 #[derive(Debug, serde::Deserialize)]
 pub struct ChatParams {
-    /// 请求 ID / 会话 ID
-    rid: String,
+    /// 会话 ID
+    session_id: String,
 }
 
 /// 聊天室请求体
@@ -175,7 +175,7 @@ fn get_client_ip(headers: &axum::http::HeaderMap, remote_addr: &str) -> String {
 /// 聊天室请求主处理器
 ///
 /// ### 路由
-/// `POST /chat.php?rid=<session_id>`
+/// `POST /chat.php?session_id=<会话ID>`
 ///
 /// ### 请求格式
 /// ```json
@@ -203,7 +203,7 @@ pub async fn chat_handler(
 ) -> Response {
     // 提取客户端 IP 和会话 ID
     let client_ip = get_client_ip(&headers, &connect_info.to_string());
-    let client_rid = params.rid;
+    let client_session_id = params.session_id;
 
     // ========================================
     // 权限验证
@@ -216,7 +216,7 @@ pub async fn chat_handler(
         }
 
         // 检查客户端是否已通过答题验证
-        if !srs_db.has_authorized_client(&client_ip, &client_rid) {
+        if !srs_db.has_authorized_client(&client_ip, &client_session_id) {
             return Json(json!({"status": "Nope"})).into_response();
         }
     }
@@ -236,7 +236,7 @@ pub async fn chat_handler(
         // --- 客户端连接 ---
         ChatRequest::Hello => {
             let chat_db = state.chat_db.read();
-            let name = chat_db.get_client_name(&client_ip, &client_rid);
+            let name = chat_db.get_client_name(&client_ip, &client_session_id);
             let msgs = chat_db.get_chat_from(-1.0, false);
             response = response
                 .with_status("Okay")
@@ -247,10 +247,10 @@ pub async fn chat_handler(
         // --- 设置用户昵称 ---
         ChatRequest::SetName { name } => {
             let mut chat_db = state.chat_db.write();
-            let success = chat_db.set_client_name(&client_ip, &client_rid, name.clone());
+            let success = chat_db.set_client_name(&client_ip, &client_session_id, name.clone());
             response = response
                 .with_status(if success { "Okay" } else { "Nope" })
-                .with_name(chat_db.get_client_name(&client_ip, &client_rid));
+                .with_name(chat_db.get_client_name(&client_ip, &client_session_id));
         }
 
         // --- 设置直播间名称（仅主播） ---
@@ -258,7 +258,7 @@ pub async fn chat_handler(
             // 检查是否为主播
             let is_publisher = {
                 let srs_db = state.srs_db.read();
-                srs_db.client_is_publisher(&client_ip, &client_rid)
+                srs_db.client_is_publisher(&client_ip, &client_session_id)
             };
 
             if is_publisher {
@@ -298,12 +298,12 @@ pub async fn chat_handler(
             // 检查是否为主播
             let is_publisher = {
                 let srs_db = state.srs_db.read();
-                srs_db.client_is_publisher(&client_ip, &client_rid)
+                srs_db.client_is_publisher(&client_ip, &client_session_id)
             };
 
             // 添加消息到数据库
             let mut chat_db = state.chat_db.write();
-            chat_db.add_entry(client_ip, client_rid, chat, is_publisher);
+            chat_db.add_entry(client_ip, client_session_id, chat, is_publisher);
             response = response.with_status("Okay");
         }
 
@@ -326,13 +326,13 @@ pub async fn chat_handler(
             // 检查是否为主播
             let is_publisher = {
                 let srs_db = state.srs_db.read();
-                srs_db.client_is_publisher(&client_ip, &client_rid)
+                srs_db.client_is_publisher(&client_ip, &client_session_id)
             };
 
             if is_publisher {
                 let chat_db = state.chat_db.read();
                 chat_db.dump_full();
-                tracing::debug!("({}, {}): 主播保存了聊天记录", client_ip, client_rid);
+                tracing::debug!("({}, {}): 主播保存了聊天记录", client_ip, client_session_id);
                 response = response.with_status("Okay");
             } else {
                 response = response.with_status("Nope");

@@ -131,8 +131,8 @@ impl StreamerStatus {
 pub struct ClientRecord {
     /// 客户端 IP 地址
     pub ip: String,
-    /// 请求 ID / 会话 ID
-    pub rid: String,
+    /// 会话 ID
+    pub session_id: String,
     /// 分配的问题
     pub question: String,
     /// 正确答案
@@ -154,12 +154,12 @@ impl ClientRecord {
     ///
     /// ### 参数
     /// - `ip`: 客户端 IP 地址
-    /// - `rid`: 请求 ID / 会话 ID
-    pub fn new(ip: String, rid: String) -> Self {
+    /// - `session_id`: 会话 ID
+    pub fn new(ip: String, session_id: String) -> Self {
         let now = Utc::now();
         Self {
             ip,
-            rid,
+            session_id,
             question: String::new(),
             answer: String::new(),
             display_name: None,
@@ -191,8 +191,8 @@ pub struct StreamerRecord {
     pub ip: Option<String>,
     /// 推流密钥
     pub secret: Option<String>,
-    /// 主播的请求 ID
-    pub rid: Option<String>,
+    /// 主播的会话 ID
+    pub session_id: Option<String>,
     /// 流 URI（格式：app=xxx&stream=xxx）
     pub stream_uri: Option<String>,
     /// 直播间名称
@@ -210,7 +210,7 @@ impl StreamerRecord {
         Self {
             ip: None,
             secret: None,
-            rid: None,
+            session_id: None,
             stream_uri: None,
             stream_name: None,
             status: StreamerStatus::Standby,
@@ -278,7 +278,7 @@ impl StreamerVerifier {
 ///
 /// 管理所有客户端和主播的状态
 pub struct SrsDatabaseInner {
-    /// 客户端映射：IP -> rid -> ClientRecord
+    /// 客户端映射：IP -> session_id -> ClientRecord
     pub clients: HashMap<String, HashMap<String, ClientRecord>>,
     /// 主播记录
     pub streamer: StreamerRecord,
@@ -316,74 +316,74 @@ impl SrsDatabaseInner {
     // ========================================================================
 
     /// 检查客户端是否存在
-    pub fn has_client(&self, ip: &str, rid: &str) -> bool {
+    pub fn has_client(&self, ip: &str, session_id: &str) -> bool {
         self.clients
             .get(ip)
-            .and_then(|m| m.get(rid))
+            .and_then(|m| m.get(session_id))
             .is_some()
     }
 
     /// 检查客户端是否已授权（可以拉流）
-    pub fn has_authorized_client(&self, ip: &str, rid: &str) -> bool {
+    pub fn has_authorized_client(&self, ip: &str, session_id: &str) -> bool {
         self.clients
             .get(ip)
-            .and_then(|m| m.get(rid))
+            .and_then(|m| m.get(session_id))
             .map(|r| r.status.is_authorized())
             .unwrap_or(false)
     }
 
     /// 添加新客户端
-    pub fn add_client(&mut self, ip: String, rid: String) {
+    pub fn add_client(&mut self, ip: String, session_id: String) {
         self.clients
             .entry(ip.clone())
             .or_insert_with(HashMap::new)
-            .insert(rid.clone(), ClientRecord::new(ip, rid));
+            .insert(session_id.clone(), ClientRecord::new(ip, session_id));
     }
 
     /// 获取客户端记录（只读）
-    pub fn get_client(&self, ip: &str, rid: &str) -> Option<&ClientRecord> {
-        self.clients.get(ip)?.get(rid)
+    pub fn get_client(&self, ip: &str, session_id: &str) -> Option<&ClientRecord> {
+        self.clients.get(ip)?.get(session_id)
     }
 
     /// 获取客户端记录（可变）
-    pub fn get_client_mut(&mut self, ip: &str, rid: &str) -> Option<&mut ClientRecord> {
-        self.clients.get_mut(ip)?.get_mut(rid)
+    pub fn get_client_mut(&mut self, ip: &str, session_id: &str) -> Option<&mut ClientRecord> {
+        self.clients.get_mut(ip)?.get_mut(session_id)
     }
 
     /// 移除客户端
-    pub fn remove_client(&mut self, ip: &str, rid: &str) -> Option<ClientRecord> {
-        self.clients.get_mut(ip)?.remove(rid)
+    pub fn remove_client(&mut self, ip: &str, session_id: &str) -> Option<ClientRecord> {
+        self.clients.get_mut(ip)?.remove(session_id)
     }
 
     /// 获取客户端的问题和答案
-    pub fn get_client_qa(&self, ip: &str, rid: &str) -> Option<(&str, &str)> {
-        self.get_client(ip, rid)
+    pub fn get_client_qa(&self, ip: &str, session_id: &str) -> Option<(&str, &str)> {
+        self.get_client(ip, session_id)
             .map(|r| (r.question.as_str(), r.answer.as_str()))
     }
 
     /// 设置客户端的问题和答案
-    pub fn set_client_qa(&mut self, ip: &str, rid: &str, q: String, a: String) {
-        if let Some(client) = self.get_client_mut(ip, rid) {
+    pub fn set_client_qa(&mut self, ip: &str, session_id: &str, q: String, a: String) {
+        if let Some(client) = self.get_client_mut(ip, session_id) {
             client.question = q;
             client.answer = a;
         }
     }
 
     /// 获取客户端显示名称
-    pub fn get_client_display_name(&self, ip: &str, rid: &str) -> Option<&str> {
-        self.get_client(ip, rid)?.display_name.as_deref()
+    pub fn get_client_display_name(&self, ip: &str, session_id: &str) -> Option<&str> {
+        self.get_client(ip, session_id)?.display_name.as_deref()
     }
 
     /// 设置客户端显示名称
-    pub fn set_client_display_name(&mut self, ip: &str, rid: &str, name: String) {
-        if let Some(client) = self.get_client_mut(ip, rid) {
+    pub fn set_client_display_name(&mut self, ip: &str, session_id: &str, name: String) {
+        if let Some(client) = self.get_client_mut(ip, session_id) {
             client.display_name = Some(name);
         }
     }
 
     /// 获取客户端状态
-    pub fn get_client_status(&self, ip: &str, rid: &str) -> Option<ClientStatus> {
-        self.get_client(ip, rid).map(|r| r.status)
+    pub fn get_client_status(&self, ip: &str, session_id: &str) -> Option<ClientStatus> {
+        self.get_client(ip, session_id).map(|r| r.status)
     }
 
     /// 更新客户端活动和状态
@@ -391,8 +391,8 @@ impl SrsDatabaseInner {
     /// ### 返回值
     /// - `true`: 更新成功
     /// - `false`: 客户端不存在
-    pub fn update_client_activity(&mut self, ip: &str, rid: &str, status: ClientStatus) -> bool {
-        if let Some(client) = self.get_client_mut(ip, rid) {
+    pub fn update_client_activity(&mut self, ip: &str, session_id: &str, status: ClientStatus) -> bool {
+        if let Some(client) = self.get_client_mut(ip, session_id) {
             client.status = status;
             client.last_activity = Utc::now();
             true
@@ -402,15 +402,15 @@ impl SrsDatabaseInner {
     }
 
     /// 设置客户端为主播
-    pub fn set_client_publisher(&mut self, ip: &str, rid: &str) {
-        if let Some(client) = self.get_client_mut(ip, rid) {
+    pub fn set_client_publisher(&mut self, ip: &str, session_id: &str) {
+        if let Some(client) = self.get_client_mut(ip, session_id) {
             client.is_publisher = true;
         }
     }
 
     /// 检查客户端是否为主播
-    pub fn client_is_publisher(&self, ip: &str, rid: &str) -> bool {
-        self.get_client(ip, rid)
+    pub fn client_is_publisher(&self, ip: &str, session_id: &str) -> bool {
+        self.get_client(ip, session_id)
             .map(|r| r.is_publisher)
             .unwrap_or(false)
     }
@@ -469,9 +469,9 @@ impl SrsDatabaseInner {
     /// ### 返回值
     /// - `true`: 密钥匹配，连接成功
     /// - `false`: 密钥不匹配
-    pub fn connect_streamer(&mut self, rid: String, secret: &str) -> bool {
+    pub fn connect_streamer(&mut self, session_id: String, secret: &str) -> bool {
         if self.streamer.secret.as_deref() == Some(secret) {
-            self.streamer.rid = Some(rid);
+            self.streamer.session_id = Some(session_id);
             true
         } else {
             false
@@ -512,13 +512,13 @@ impl SrsDatabaseInner {
     /// 结束推流
     ///
     /// ### 参数
-    /// - `rid`: 主播的请求 ID（可选，用于验证）
+    /// - `session_id`: 主播的会话 ID（可选，用于验证）
     ///
     /// ### 返回值
     /// - `true`: 结束成功
-    /// - `false`: rid 不匹配
-    pub fn end_streaming(&mut self, rid: Option<&str>) -> bool {
-        if rid.is_some() && self.streamer.rid.as_deref() == rid {
+    /// - `false`: session_id 不匹配
+    pub fn end_streaming(&mut self, session_id: Option<&str>) -> bool {
+        if session_id.is_some() && self.streamer.session_id.as_deref() == session_id {
             self.streamer = StreamerRecord::new();
             true
         } else {
@@ -574,19 +574,19 @@ impl SrsDatabase {
         // 清理过期的客户端
         let mut clients_to_remove = Vec::new();
         for (ip, clients) in db.clients.iter_mut() {
-            let mut rids_to_remove = Vec::new();
-            for (rid, client) in clients.iter() {
+            let mut session_ids_to_remove = Vec::new();
+            for (session_id, client) in clients.iter() {
                 if client.is_expired() {
                     tracing::debug!(
-                        "srs_db.tick(): 移除过期客户端: (ip={}, rid={})",
+                        "srs_db.tick(): 移除过期客户端: (ip={}, session_id={})",
                         ip,
-                        rid
+                        session_id
                     );
-                    rids_to_remove.push(rid.clone());
+                    session_ids_to_remove.push(session_id.clone());
                 }
             }
-            for rid in rids_to_remove {
-                clients.remove(&rid);
+            for session_id in session_ids_to_remove {
+                clients.remove(&session_id);
             }
             if clients.is_empty() {
                 clients_to_remove.push(ip.clone());

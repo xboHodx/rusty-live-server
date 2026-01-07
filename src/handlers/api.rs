@@ -223,9 +223,9 @@ pub async fn api_handler(
 ) -> Response {
     // 提取客户端 IP 和会话 ID
     let client_ip = get_client_ip(&headers, &connect_info.to_string());
-    let client_sid = params.session_id.clone();
+    let client_session_id = params.session_id.clone();
 
-    tracing::debug!("API 请求: ip={}, session_id={}", client_ip, client_sid);
+    tracing::debug!("API 请求: ip={}, session_id={}", client_ip, client_session_id);
 
     // 初始化响应对象
     let mut response = ApiResponse::new();
@@ -246,8 +246,8 @@ pub async fn api_handler(
     // ========================================
     if params.action.as_deref() == Some("connect") {
         // 情况1: 已存在的客户端
-        if srs_db_read.has_client(&client_ip, &client_sid) {
-            let status = srs_db_read.get_client_status(&client_ip, &client_sid);
+        if srs_db_read.has_client(&client_ip, &client_session_id) {
+            let status = srs_db_read.get_client_status(&client_ip, &client_session_id);
 
             match status {
                 // 已通过验证的用户（Legal/Playing/Resting）
@@ -257,20 +257,20 @@ pub async fn api_handler(
                         response = response.with_video_uri(uri.to_string());
                     }
                     // 如果是主播，标记 is_publisher=true
-                    if srs_db_read.client_is_publisher(&client_ip, &client_sid) {
+                    if srs_db_read.client_is_publisher(&client_ip, &client_session_id) {
                         response = response.with_publisher();
-                        tracing::debug!("({}, {}): 主播已连接", client_ip, client_sid);
+                        tracing::debug!("({}, {}): 主播已连接", client_ip, client_session_id);
                     }
                 }
                 // 答错题被封禁的用户（Nil）
                 // 返回假的视频地址作为惩罚
                 Some(ClientStatus::Nil) => {
                     response = response.with_video_uri("app=genshin&straem=impact".to_string());
-                    tracing::debug!("({}, {}): 被封禁的客户端（答错题）", client_ip, client_sid);
+                    tracing::debug!("({}, {}): 被封禁的客户端（答错题）", client_ip, client_session_id);
                 }
                 // 其他状态（主要是 Pending）- 再次返回题目
                 _ => {
-                    if let Some((q, _)) = srs_db_read.get_client_qa(&client_ip, &client_sid) {
+                    if let Some((q, _)) = srs_db_read.get_client_qa(&client_ip, &client_session_id) {
                         response = response.with_question(q.to_string());
                     }
                 }
@@ -296,7 +296,7 @@ pub async fn api_handler(
             tracing::debug!(
                 "({}, {}): 新客户端: 问题=\"{}\", 答案=\"{}\"",
                 client_ip,
-                client_sid,
+                client_session_id,
                 q_with_answer,
                 a
             );
@@ -304,8 +304,8 @@ pub async fn api_handler(
             // 在数据库中注册新客户端并存储题目
             {
                 let mut srs_db_write = state.srs_db.write();
-                srs_db_write.add_client(client_ip.clone(), client_sid.clone());
-                srs_db_write.set_client_qa(&client_ip, &client_sid, q_with_answer.clone(), a);
+                srs_db_write.add_client(client_ip.clone(), client_session_id.clone());
+                srs_db_write.set_client_qa(&client_ip, &client_session_id, q_with_answer.clone(), a);
             }
 
             response = response.with_question(q_with_answer);
@@ -318,7 +318,7 @@ pub async fn api_handler(
     // ========================================
     if let Some(answer) = params.answer {
         // 检查客户端是否存在
-        if !srs_db_read.has_client(&client_ip, &client_sid) {
+        if !srs_db_read.has_client(&client_ip, &client_session_id) {
             return forbidden_json_response();
         }
 
@@ -330,27 +330,27 @@ pub async fn api_handler(
             let mut db = state.srs_db.write();
 
             // 验证 secret 是否正确
-            if db.connect_streamer(client_sid.clone(), &answer) {
+            if db.connect_streamer(client_session_id.clone(), &answer) {
                 // 验证成功 - 标记为主播
-                db.update_client_activity(&client_ip, &client_sid, ClientStatus::Legal);
-                db.set_client_publisher(&client_ip, &client_sid);
+                db.update_client_activity(&client_ip, &client_session_id, ClientStatus::Legal);
+                db.set_client_publisher(&client_ip, &client_session_id);
                 response = response.with_publisher();
                 if let Some(uri) = db.get_stream_uri() {
                     response = response.with_video_uri(uri.to_string());
                 }
-                tracing::debug!("({}, {}): 主播身份验证成功", client_ip, client_sid);
+                tracing::debug!("({}, {}): 主播身份验证成功", client_ip, client_session_id);
             } else {
                 // 验证失败 - 返回假的视频地址
-                db.update_client_activity(&client_ip, &client_sid, ClientStatus::Nil);
+                db.update_client_activity(&client_ip, &client_session_id, ClientStatus::Nil);
                 response = response.with_video_uri("app=ehviewer&straem=lolicon".to_string());
-                tracing::debug!("({}, {}): 无效的主播密钥", client_ip, client_sid);
+                tracing::debug!("({}, {}): 无效的主播密钥", client_ip, client_session_id);
             }
             return Json(response).into_response();
         }
 
         // 普通用户答题
         // 只允许 Pending 状态的用户提交答案
-        let status = srs_db_read.get_client_status(&client_ip, &client_sid);
+        let status = srs_db_read.get_client_status(&client_ip, &client_session_id);
         if status != Some(ClientStatus::Pending) {
             return Json(json!({"error": "Not in pending state"})).into_response();
         }
@@ -360,21 +360,21 @@ pub async fn api_handler(
 
         // 获取存储的正确答案并验证
         let correct = srs_db_write
-            .get_client_qa(&client_ip, &client_sid)
+            .get_client_qa(&client_ip, &client_session_id)
             .map(|(_, correct_answer)| correct_answer == answer)
             .unwrap_or(false);
 
         if correct {
             // 答对了 - 状态改为 Legal，返回播放地址
-            srs_db_write.update_client_activity(&client_ip, &client_sid, ClientStatus::Legal);
+            srs_db_write.update_client_activity(&client_ip, &client_session_id, ClientStatus::Legal);
             if let Some(uri) = srs_db_write.get_stream_uri() {
                 response = response.with_video_uri(uri.to_string());
             }
         } else {
             // 答错了 - 状态改为 Nil（被封禁），返回假地址
-            srs_db_write.update_client_activity(&client_ip, &client_sid, ClientStatus::Nil);
+            srs_db_write.update_client_activity(&client_ip, &client_session_id, ClientStatus::Nil);
             response = response.with_video_uri("app=ehviewer&straem=lolicon".to_string());
-            tracing::debug!("({}, {}): 答案错误", client_ip, client_sid);
+            tracing::debug!("({}, {}): 答案错误", client_ip, client_session_id);
         }
         return Json(response).into_response();
     }
@@ -387,10 +387,10 @@ pub async fn api_handler(
         let mut db = state.srs_db.write();
 
         // 只有当前主播可以结束直播
-        if db.end_streaming(Some(&client_sid)) {
+        if db.end_streaming(Some(&client_session_id)) {
             // 清空聊天记录
             state.chat_db.write().reset();
-            tracing::debug!("({}, {}): 主播结束了直播", client_ip, client_sid);
+            tracing::debug!("({}, {}): 主播结束了直播", client_ip, client_session_id);
             return (axum::http::StatusCode::OK, "\"ok\"").into_response();
         } else {
             return forbidden_json_response();
@@ -402,11 +402,11 @@ pub async fn api_handler(
     // ========================================
     if params.status.is_some() {
         // 根据当前状态确定返回的状态值
-        let stream_status = if !srs_db_read.has_client(&client_ip, &client_sid) {
+        let stream_status = if !srs_db_read.has_client(&client_ip, &client_session_id) {
             // 客户端不存在
             StreamStatus::Unregistered
         } else {
-            match srs_db_read.get_client_status(&client_ip, &client_sid) {
+            match srs_db_read.get_client_status(&client_ip, &client_session_id) {
                 // 答错题被禁
                 Some(ClientStatus::Nil) => StreamStatus::Banned,
                 // 待答题
