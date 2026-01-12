@@ -146,8 +146,8 @@ impl ChatDatabaseInner {
             client.uid
         } else {
             // 创建新的匿名用户
-            self.next_uid += 1;
             let uid = self.next_uid;
+            self.next_uid += 1;
             self.client_map
                 .entry(ip.clone())
                 .or_insert_with(HashMap::new)
@@ -191,8 +191,8 @@ impl ChatDatabaseInner {
             client.uid
         } else {
             // 新客户端，带昵称注册
-            self.next_uid += 1;
             let uid = self.next_uid;
+            self.next_uid += 1;
             self.client_map
                 .entry(ip.to_string())
                 .or_insert_with(HashMap::new)
@@ -208,7 +208,6 @@ impl ChatDatabaseInner {
         self.name_map.insert(name.clone());
         self.uid_map.insert(uid, name.clone());
 
-        // 更新 client_map 中的昵称
         if let Some(client) = self.client_map.get_mut(ip).and_then(|m| m.get_mut(session_id)) {
             client.name = Some(name);
         }
@@ -315,7 +314,7 @@ impl ChatDatabaseInner {
             .messages
             .iter()
             .map(|m| {
-                let mut obj = serde_json::json!({
+                let obj = serde_json::json!({
                     "uid": m.uid,
                     "name": self.uid_map.get(&m.uid),
                     "ip": self.ip_map.get(&m.uid),
@@ -353,7 +352,7 @@ impl ChatDatabaseInner {
     /// 转储精简聊天记录到文件
     ///
     /// 仅包含消息记录，不包含用户映射
-    pub fn dump_brief(&self) {
+    pub fn _dump_brief(&self) {
         let records: Vec<serde_json::Value> = self
             .messages
             .iter()
@@ -433,11 +432,12 @@ impl StreamingInfo {
                         }
                     }
                 } else {
+                    tracing::warn!("GET from {}, received response but status is not success", api_url);
                     self.audiences = -1;
                 }
             }
-            Err(_) => {
-                tracing::debug!("unable to fetch audiences at this time");
+            Err(e) => {
+                tracing::warn!("GET from {} error: {}", api_url, e);
                 self.audiences = -1;
             }
         }
@@ -449,10 +449,10 @@ impl StreamingInfo {
     /// - `srs_api_url`: SRS API 地址
     ///
     /// ### 行为说明
-    /// 每 3 秒从 SRS API 获取一次观众人数
+    /// 每 5 秒从 SRS API 获取一次观众人数
     pub async fn spin(&mut self, srs_api_url: String) {
         let active = self.active.clone();
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(3));
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
 
         loop {
             tokio::select! {

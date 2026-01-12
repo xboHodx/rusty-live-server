@@ -47,10 +47,10 @@ impl Config {
     /// 从环境变量或默认值创建配置
     ///
     /// ### 默认值
-    /// - API 地址: 127.0.0.1:3484
-    /// - 聊天地址: 127.0.0.1:3614
-    /// - SRS 地址: 127.0.0.1:8848
-    /// - SRS API: 127.0.0.1:1985
+    /// - API 地址: 0.0.0.0:3484
+    /// - 聊天地址: 0.0.0.0:3614
+    /// - SRS 地址: 0.0.0.0:8848
+    /// - SRS API: 0.0.0.0:1985
     /// - 基础路径: `/home/xbohodx02/work/rusty-live-server`
     ///
     /// ### 注意事项
@@ -60,17 +60,17 @@ impl Config {
         let base_path = PathBuf::from("/home/xbohodx02/work/rusty-live-server");
 
         Self {
-            api_host: "127.0.0.1".parse().unwrap(),
+            api_host: "0.0.0.0".parse().unwrap(),
             api_port: 3484,
-            chat_host: "127.0.0.1".parse().unwrap(),
+            chat_host: "0.0.0.0".parse().unwrap(),
             chat_port: 3614,
-            srs_host: "127.0.0.1".parse().unwrap(),
+            srs_host: "0.0.0.0".parse().unwrap(),
             srs_port: 8848,
             base_path: base_path.clone(),
             banner_db_path: base_path.join("config/bannerdb"),
             dump_path: base_path.join("dumps"),
             secret_path: base_path.join("secrets/secret.txt"),
-            srs_api_host: "127.0.0.1".to_string(),
+            srs_api_host: "0.0.0.0".to_string(),
             srs_api_port: 1985,
         }
     }
