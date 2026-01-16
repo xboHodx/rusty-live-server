@@ -198,7 +198,7 @@ async fn handle_on_publish(
 /// 当观众开始拉流时触发。
 ///
 /// ### 验证流程
-/// 1. 从 param 中提取 rid 参数
+/// 1. 从 param 中提取 session_id 参数（向后兼容 rid）
 /// 2. 检查客户端是否已注册
 /// 3. 检查客户端状态是否允许拉流
 /// 4. 更新客户端状态为 Playing
@@ -206,9 +206,13 @@ async fn handle_on_play(
     state: Arc<crate::state::AppState>,
     payload: SrsCallbackRequest,
 ) -> Response {
-    // 解析查询参数
+    // 解析查询参数（优先使用 session_id，向后兼容 rid）
     let queries = parse_param(&payload.param);
-    let session_id = queries.get("rid").cloned().unwrap_or_default();
+    let session_id = queries
+        .get("session_id")
+        .or_else(|| queries.get("rid"))
+        .cloned()
+        .unwrap_or_default();
 
     let srs_db = state.srs_db.read();
 
@@ -264,9 +268,9 @@ async fn handle_on_stop(
     state: Arc<crate::state::AppState>,
     payload: SrsCallbackRequest,
 ) -> Response {
-    // 解析查询参数
+    // 解析查询参数（优先使用 session_id，向后兼容 rid）
     let queries = parse_param(&payload.param);
-    let session_id = queries.get("rid").cloned();
+    let session_id = queries.get("session_id").or_else(|| queries.get("rid")).cloned();
 
     let mut srs_db = state.srs_db.write();
 

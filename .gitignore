@@ -1,0 +1,33 @@
+# Rust build outputs
+/target
+/**/*.rs.bk
+*.pdb
+
+# Cargo lock file (optional)
+# Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local configuration and data
+/secrets/secret.txt
+/dumps/*.dump
+config/bannerdb
+
+# Logs
+*.log
+
+# Reference (Python original)
+参考/
+
+/CLAUDE.md
+/static
+/docs

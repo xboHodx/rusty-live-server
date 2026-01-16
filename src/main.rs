@@ -27,7 +27,7 @@ use state::AppState;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::signal;
-use tower_http::trace::TraceLayer;
+use tower_http::{services::ServeDir, trace::TraceLayer};
 use tracing::{info, Level};
 
 /// 程序入口点
@@ -93,6 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let api_app = Router::new()
         .route("/api.php", get(handlers::api_handler))
         .layer(TraceLayer::new_for_http())
+        .fallback_service(ServeDir::new("stratic"))
         .with_state(state.clone());
 
     // ========================================
@@ -114,7 +115,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ========================================
     // 9. 启动后台清理任务
     // ========================================
-    /// 每 10 秒清理过期的客户端和主播记录
+    // 每 10 秒清理过期的客户端和主播记录
     let srs_db_for_tick = state.srs_db.clone();
     let tick_task = tokio::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
