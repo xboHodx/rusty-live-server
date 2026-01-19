@@ -195,7 +195,7 @@ fn get_client_ip(headers: &axum::http::HeaderMap, remote_addr: &str) -> String {
 /// API 请求主处理器
 ///
 /// ### 路由
-/// `GET /api.php`
+/// `GET /api`
 ///
 /// ### 支持的操作
 /// | 操作 | 参数 | 说明 |
@@ -231,7 +231,7 @@ pub async fn api_handler(
     let mut response = ApiResponse::new();
 
     // 获取数据库读锁（后续根据需要升级为写锁）
-    let srs_db_read = state.srs_db.read();
+    let srs_db_read = state.srs_db.inner.read();
 
     // ========================================
     // 设置直播间名称（所有响应都包含）
@@ -303,7 +303,7 @@ pub async fn api_handler(
 
             // 在数据库中注册新客户端并存储题目
             {
-                let mut srs_db_write = state.srs_db.write();
+                let mut srs_db_write = state.srs_db.inner.write();
                 srs_db_write.add_client(client_ip.clone(), client_session_id.clone());
                 srs_db_write.set_client_qa(&client_ip, &client_session_id, q_with_answer.clone(), a);
             }
@@ -327,7 +327,7 @@ pub async fn api_handler(
         // 主播可以跳过答题，直接输入推流密钥验证身份
         if answer.starts_with("secret_") {
             drop(srs_db_read);
-            let mut db = state.srs_db.write();
+            let mut db = state.srs_db.inner.write();
 
             // 验证 secret 是否正确
             if db.connect_streamer(client_session_id.clone(), &answer) {
@@ -356,7 +356,7 @@ pub async fn api_handler(
         }
 
         drop(srs_db_read);
-        let mut srs_db_write = state.srs_db.write();
+        let mut srs_db_write = state.srs_db.inner.write();
 
         // 获取存储的正确答案并验证
         let correct = srs_db_write
@@ -384,12 +384,12 @@ pub async fn api_handler(
     // ========================================
     if params.end.as_deref() == Some("true") {
         drop(srs_db_read);
-        let mut db = state.srs_db.write();
+        let mut db = state.srs_db.inner.write();
 
         // 只有当前主播可以结束直播
         if db.end_streaming(Some(&client_session_id)) {
             // 清空聊天记录
-            state.chat_db.write().reset();
+            state.chat_db.inner.write().reset();
             tracing::debug!("({}, {}): 主播结束了直播", client_ip, client_session_id);
             return (axum::http::StatusCode::OK, "\"ok\"").into_response();
         } else {

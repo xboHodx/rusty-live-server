@@ -3,12 +3,10 @@
 //! 定义应用程序的配置结构体和加载逻辑。
 //!
 //! ## 配置项说明
-//! - API 服务地址和端口（3484）
-//! - 聊天服务地址和端口（3614）
-//! - SRS 回调服务地址和端口（8848）
+//! - 服务监听地址和端口（8848）
 //! - 文件路径（题库、密钥、转储目录）
-//! - SRS API 地址
 
+use std::env;
 use std::net::IpAddr;
 use std::path::PathBuf;
 
@@ -17,21 +15,13 @@ use std::path::PathBuf;
 /// 包含所有运行时配置参数
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// API 服务监听地址
-    pub api_host: IpAddr,
-    /// API 服务监听端口
-    pub api_port: u16,
-    /// 聊天服务监听地址
-    pub chat_host: IpAddr,
-    /// 聊天服务监听端口
-    pub chat_port: u16,
-    /// SRS 回调服务监听地址
-    pub srs_host: IpAddr,
-    /// SRS 回调服务监听端口
-    pub srs_port: u16,
+    /// 服务监听地址
+    pub host: IpAddr,
+    /// 服务监听端口
+    pub port: u16,
     /// 基础路径（所有其他路径的根目录）
     pub base_path: PathBuf,
-    /// 题库数据库文件路径
+    /// 题库数据库目录路径
     pub banner_db_path: PathBuf,
     /// 聊天记录转储目录
     pub dump_path: PathBuf,
@@ -46,52 +36,38 @@ pub struct Config {
 impl Config {
     /// 从环境变量或默认值创建配置
     ///
-    /// ### 默认值
-    /// - API 地址: 0.0.0.0:3484
-    /// - 聊天地址: 0.0.0.0:3614
-    /// - SRS 地址: 0.0.0.0:8848
-    /// - SRS API: 0.0.0.0:1985
-    /// - 基础路径: `/home/xbohodx02/work/rusty-live-server`
+    /// ### 环境变量
+    /// - `LIVE_SERVER_BASE_PATH` - 基础路径（默认：当前工作目录）
     ///
-    /// ### 注意事项
-    /// 目前 `base_path` 是硬编码的，实际部署时需要修改或改为从环境变量读取
+    /// ### 默认值
+    /// - 服务地址: 0.0.0.0:8848
+    /// - 基础路径: 当前工作目录
     pub fn from_env() -> Self {
-        // 基础路径（当前硬编码）
-        let base_path = PathBuf::from("/home/xbohodx02/work/rusty-live-server");
+        // 基础路径：优先使用环境变量，否则使用当前工作目录
+        let base_path = if let Ok(path) = env::var("LIVE_SERVER_BASE_PATH") {
+            PathBuf::from(path)
+        } else {
+            env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+        };
 
         Self {
-            api_host: "0.0.0.0".parse().unwrap(),
-            api_port: 3484,
-            chat_host: "0.0.0.0".parse().unwrap(),
-            chat_port: 3614,
-            srs_host: "0.0.0.0".parse().unwrap(),
-            srs_port: 8848,
+            host: "0.0.0.0".parse().unwrap(),
+            port: 8848,
             base_path: base_path.clone(),
             banner_db_path: base_path.join("config/bannerdb"),
             dump_path: base_path.join("dumps"),
             secret_path: base_path.join("secrets/secret.txt"),
-            srs_api_host: "0.0.0.0".to_string(),
+            srs_api_host: "127.0.0.1".to_string(),
             srs_api_port: 1985,
         }
     }
 
-    /// 获取 API 服务地址（host:port 格式）
-    pub fn api_addr(&self) -> String {
-        format!("{}:{}", self.api_host, self.api_port)
+    /// 获取服务地址（host:port 格式）
+    pub fn addr(&self) -> String {
+        format!("{}:{}", self.host, self.port)
     }
 
-    /// 获取聊天服务地址（host:port 格式）
-    pub fn chat_addr(&self) -> String {
-        format!("{}:{}", self.chat_host, self.chat_port)
-    }
-
-    /// 获取 SRS 回调服务地址（host:port 格式）
-    pub fn srs_addr(&self) -> String {
-        format!("{}:{}", self.srs_host, self.srs_port)
-    }
-
-    /// 获取 SRS API URL（http://host:port 格式）
-    pub fn srs_api_url(&self) -> String {
-        format!("http://{}:{}", self.srs_api_host, self.srs_api_port)
+    pub fn srs_api_addr(&self) -> String {
+        format!("{}:{}", self.srs_api_host, self.srs_api_port)
     }
 }

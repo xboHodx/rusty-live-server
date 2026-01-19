@@ -22,12 +22,10 @@ Thumbs.db
 /dumps/*.dump
 config/bannerdb
 
-# Logs
-*.log
-
 # Reference (Python original)
 参考/
 
 /CLAUDE.md
 /static
 /docs
+/CLAUDE.md

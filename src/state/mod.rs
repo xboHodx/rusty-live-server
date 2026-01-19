@@ -10,20 +10,20 @@
 pub mod srs;    // SRS 相关状态管理
 pub mod chat;   // 聊天室状态管理
 pub mod banner; // 题库状态管理
+pub mod streaming_info;
 
 // 导出公共类型，供其他模块使用
-pub use srs::{ClientStatus};  // SRS 数据库和状态枚举
-pub use banner::BannerDatabase;                              // 题库数据库
+pub use srs::ClientStatus;  // SRS 状态枚举
+pub use banner::BannerDatabase;  // 题库数据库
 
 // 导入依赖
 use std::sync::Arc;
-use parking_lot::RwLock;
 use crate::config::Config;
+use crate::state::streaming_info::StreamingInfo;
 
 /// 全局应用状态
 ///
 /// 此结构体在所有处理器之间共享，包含了应用程序运行所需的所有状态数据。
-/// 使用 `Arc<RwLock<>>` 包装以实现线程安全的读写访问。
 ///
 /// ### 字段说明
 /// - `srs_db`: SRS 客户端和主播状态数据库
@@ -33,13 +33,15 @@ use crate::config::Config;
 #[derive(Clone)]
 pub struct AppState {
     /// SRS 数据库 - 管理客户端连接、主播状态、答题验证等
-    pub srs_db: Arc<RwLock<srs::SrsDatabaseInner>>,
+    pub srs_db: srs::SrsDatabase,
     /// 聊天室数据库 - 管理聊天消息、用户昵称、UID 映射等
-    pub chat_db: Arc<RwLock<chat::ChatDatabaseInner>>,
+    pub chat_db: chat::ChatDatabase,
     /// 题库数据库 - 管理答题问题，只读访问
     pub banner_db: Arc<BannerDatabase>,
     /// 应用配置 - 包含端口、路径等配置信息
     pub config: Config,
+    /// 后台流信息统计
+    pub streaming_info: StreamingInfo,
 }
 
 impl AppState {
@@ -62,10 +64,11 @@ impl AppState {
         let dump_path = config.dump_path.clone();
 
         Ok(Self {
-            srs_db: Arc::new(RwLock::new(srs::SrsDatabaseInner::new(secret_path)?)),
-            chat_db: Arc::new(RwLock::new(chat::ChatDatabaseInner::new(dump_path))),
+            srs_db: srs::SrsDatabase::new(secret_path)?,
+            chat_db: chat::ChatDatabase::new(dump_path),
             banner_db,
             config,
+            streaming_info: StreamingInfo::new(),
         })
     }
 }

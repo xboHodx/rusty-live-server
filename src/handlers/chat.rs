@@ -175,7 +175,7 @@ fn get_client_ip(headers: &axum::http::HeaderMap, remote_addr: &str) -> String {
 /// 聊天室请求主处理器
 ///
 /// ### 路由
-/// `POST /chat.php?session_id=<会话ID>`
+/// `POST /chat?session_id=<会话ID>`
 ///
 /// ### 请求格式
 /// ```json
@@ -209,7 +209,7 @@ pub async fn chat_handler(
     // 权限验证
     // ========================================
     {
-        let srs_db = state.srs_db.read();
+        let srs_db = state.srs_db.inner.read();
         // 检查直播是否已开始
         if !srs_db.is_streaming() {
             return chat_forbidden_response();
@@ -235,7 +235,7 @@ pub async fn chat_handler(
     match request {
         // --- 客户端连接 ---
         ChatRequest::Hello => {
-            let chat_db = state.chat_db.read();
+            let chat_db = state.chat_db.inner.read();
             let name = chat_db.get_client_name(&client_ip, &client_session_id);
             let msgs = chat_db.get_chat_from(-1.0, false);
             response = response
@@ -246,7 +246,7 @@ pub async fn chat_handler(
 
         // --- 设置用户昵称 ---
         ChatRequest::SetName { name } => {
-            let mut chat_db = state.chat_db.write();
+            let mut chat_db = state.chat_db.inner.write();
             let success = chat_db.set_client_name(&client_ip, &client_session_id, name.clone());
             response = response
                 .with_status(if success { "Okay" } else { "Nope" })
@@ -257,12 +257,12 @@ pub async fn chat_handler(
         ChatRequest::SetLiveName { name } => {
             // 检查是否为主播
             let is_publisher = {
-                let srs_db = state.srs_db.read();
+                let srs_db = state.srs_db.inner.read();
                 srs_db.client_is_publisher(&client_ip, &client_session_id)
             };
 
             if is_publisher {
-                let mut srs_db = state.srs_db.write();
+                let mut srs_db = state.srs_db.inner.write();
                 srs_db.set_stream_name(name.clone());
                 response = response.with_status("Okay");
             } else {
@@ -270,7 +270,7 @@ pub async fn chat_handler(
             }
             // 无论如何都返回当前直播间名称
             response = response.with_name({
-                let srs_db = state.srs_db.read();
+                let srs_db = state.srs_db.inner.read();
                 srs_db.get_stream_name().map(|s| s.to_string())
             });
         }
@@ -286,7 +286,7 @@ pub async fn chat_handler(
                 return chat_forbidden_response();
             };
 
-            let chat_db = state.chat_db.read();
+            let chat_db = state.chat_db.inner.read();
             let msgs = chat_db.get_chat_from(stamp, is_prev);
             response = response
                 .with_status("Okay")
@@ -297,12 +297,12 @@ pub async fn chat_handler(
         ChatRequest::SendChat { chat } => {
             // 检查是否为主播
             let is_publisher = {
-                let srs_db = state.srs_db.read();
+                let srs_db = state.srs_db.inner.read();
                 srs_db.client_is_publisher(&client_ip, &client_session_id)
             };
 
             // 添加消息到数据库
-            let mut chat_db = state.chat_db.write();
+            let mut chat_db = state.chat_db.inner.write();
             chat_db.add_entry(client_ip, client_session_id, chat, is_publisher);
             response = response.with_status("Okay");
         }
@@ -311,7 +311,7 @@ pub async fn chat_handler(
         ChatRequest::GetAudiences => {
             // 获取累计用户数
             let total = {
-                let chat_db = state.chat_db.read();
+                let chat_db = state.chat_db.inner.read();
                 chat_db.size()
             };
 
@@ -325,12 +325,12 @@ pub async fn chat_handler(
         ChatRequest::SaveSnapshot => {
             // 检查是否为主播
             let is_publisher = {
-                let srs_db = state.srs_db.read();
+                let srs_db = state.srs_db.inner.read();
                 srs_db.client_is_publisher(&client_ip, &client_session_id)
             };
 
             if is_publisher {
-                let chat_db = state.chat_db.read();
+                let chat_db = state.chat_db.inner.read();
                 chat_db.dump_full();
                 tracing::debug!("({}, {}): 主播保存了聊天记录", client_ip, client_session_id);
                 response = response.with_status("Okay");

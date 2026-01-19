@@ -8,10 +8,11 @@
 //! - 实时聊天室功能
 //! - 主播身份验证和权限管理
 //!
-//! ## 三端口服务设计
-//! - **端口 3484**: API 服务 - 观众鉴权和答题逻辑
-//! - **端口 3614**: 聊天服务 - 轮询式聊天室
-//! - **端口 8848**: SRS 回调服务 - 接收推流/拉流事件
+//! ## 服务设计
+//! - **端口 8848**: 统一服务
+//!   - `/` → SRS 回调
+//!   - `/api` → 认证答题
+//!   - `/chat` → 聊天室
 
 mod config;
 mod error;
@@ -27,7 +28,7 @@ use state::AppState;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::signal;
-use tower_http::{services::ServeDir, trace::TraceLayer};
+use tower_http::trace::TraceLayer;
 use tracing::{info, Level};
 
 /// 程序入口点
@@ -38,8 +39,9 @@ use tracing::{info, Level};
 /// 3. 确保必要目录存在
 /// 4. 检查/创建密钥文件
 /// 5. 初始化应用状态
-/// 6. 启动后台清理任务
-/// 7. 启动三个 HTTP 服务
+/// 6. 构建统一路由
+/// 7. 启动后台清理任务
+/// 8. 启动 HTTP 服务
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // ========================================
@@ -88,32 +90,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // ========================================
-    // 6. 构建 API 路由（端口 3484）
+    // 6. 构建统一路由（端口 8848）
     // ========================================
-    let api_app = Router::new()
-        .route("/api.php", get(handlers::api_handler))
-        .layer(TraceLayer::new_for_http())
-        .fallback_service(ServeDir::new("stratic"))
-        .with_state(state.clone());
-
-    // ========================================
-    // 7. 构建聊天室路由（端口 3614）
-    // ========================================
-    let chat_app = Router::new()
-        .route("/chat.php", post(handlers::chat_handler))
+    let app = Router::new()
+        .route("/", post(handlers::srs_callback_handler))  // SRS 回调
+        .route("/api", get(handlers::api_handler))          // 认证答题
+        .route("/chat", post(handlers::chat_handler))       // 聊天室
+        .route("/streaming_info", get(handlers::streaming_info_handler))
         .layer(TraceLayer::new_for_http())
         .with_state(state.clone());
 
     // ========================================
-    // 8. 构建 SRS 回调路由（端口 8848）
-    // ========================================
-    let srs_app = Router::new()
-        .route("/", post(handlers::srs_callback_handler))
-        .layer(TraceLayer::new_for_http())
-        .with_state(state.clone());
-
-    // ========================================
-    // 9. 启动后台清理任务
+    // 7. 启动后台任务
     // ========================================
     // 每 10 秒清理过期的客户端和主播记录
     let srs_db_for_tick = state.srs_db.clone();
@@ -121,101 +109,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(10));
         loop {
             interval.tick().await;
-
-            // 获取写锁进行清理操作
-            let mut inner = srs_db_for_tick.write();
-
-            // 获取当前时间
-            let now = chrono::Utc::now();
-
-            // 检查主播是否过期
-            if inner.streamer.is_expired() {
-                tracing::debug!("srs_db.tick(): 主播已过期，清除所有数据");
-                inner.reset();
-                continue;
-            }
-
-            // 清理过期的客户端
-            inner.clients.retain(|ip, clients| {
-                clients.retain(|session_id, client| {
-                    if client.is_expired() {
-                        tracing::debug!("移除过期客户端: (ip={}, session_id={})", ip, session_id);
-                        false
-                    } else {
-                        true
-                    }
-                });
-                // 如果 IP 下没有客户端了，移除该 IP 条目
-                if clients.is_empty() {
-                    return false;
-                }
-                return true;
-            });
+            srs_db_for_tick.tick();
         }
     });
 
-    // ========================================
-    // 10. 启动三个 HTTP 服务
-    // ========================================
-    let api_addr: SocketAddr = config.api_addr().parse()?;
-    let chat_addr: SocketAddr = config.chat_addr().parse()?;
-    let srs_addr: SocketAddr = config.srs_addr().parse()?;
-
-    // 启动 API 服务
-    let api_server = tokio::spawn(async move {
-        info!("API 服务监听在 {}", api_addr);
-        let tcp_listener = tokio::net::TcpListener::bind(api_addr).await.unwrap();
-        axum::serve(tcp_listener, api_app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
-            .unwrap();
-    });
-
-    // 启动聊天室服务
-    let chat_server = tokio::spawn(async move {
-        info!("聊天室服务监听在 {}", chat_addr);
-        let tcp_listener = tokio::net::TcpListener::bind(chat_addr).await.unwrap();
-        axum::serve(tcp_listener, chat_app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
-            .unwrap();
-    });
-
-    // 启动 SRS 回调服务
-    let srs_server = tokio::spawn(async move {
-        info!("SRS 回调服务监听在 {}", srs_addr);
-        let tcp_listener = tokio::net::TcpListener::bind(srs_addr).await.unwrap();
-        axum::serve(tcp_listener, srs_app)
-            .with_graceful_shutdown(shutdown_signal())
-            .await
-            .unwrap();
-    });
+    // 从srs获取观众人数
+    let srs_api_url = config.srs_api_addr();
+    let streaming_info = state.streaming_info.clone();
+    let streaming_info_task_handle = streaming_info.tick(srs_api_url);
 
     // ========================================
-    // 11. 等待任一服务结束或关闭信号
+    // 8. 启动 HTTP 服务
     // ========================================
-    info!("所有服务启动成功");
-    info!("API:      http://{}", config.api_addr());
-    info!("Chat:     http://{}", config.chat_addr());
-    info!("SRS:      http://{}", config.srs_addr());
+    let addr: SocketAddr = config.addr().parse()?;
 
-    tokio::select! {
-        _ = api_server => {
-            info!("API 服务已关闭");
-        }
-        _ = chat_server => {
-            info!("聊天室服务已关闭");
-        }
-        _ = srs_server => {
-            info!("SRS 回调服务已关闭");
-        }
-        _ = shutdown_signal() => {
-            info!("收到关闭信号");
-        }
-    }
+    info!("服务启动成功，监听于 {}", addr);
+    info!("  /      → SRS 回调");
+    info!("  /api   → 认证答题");
+    info!("  /chat  → 聊天室");
+    info!("  /streaming_info  → 流信息");
+
+    let tcp_listener = tokio::net::TcpListener::bind(addr).await?;
+
+    axum::serve(tcp_listener, app.into_make_service_with_connect_info::<SocketAddr>())
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap();
 
     // 中止后台清理任务
     tick_task.abort();
+    streaming_info_task_handle.abort();
 
     info!("live-server-rs 已停止");
     Ok(())

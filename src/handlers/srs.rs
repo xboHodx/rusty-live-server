@@ -147,11 +147,11 @@ async fn handle_on_publish(
     };
 
     // 检查是否已在推流
-    let is_streaming = state.srs_db.read().is_streaming();
+    let is_streaming = state.srs_db.inner.read().is_streaming();
 
     if is_streaming {
         // 已在推流，尝试恢复（可能是网络问题导致的重新推流）
-        let mut srs_db = state.srs_db.write();
+        let mut srs_db = state.srs_db.inner.write();
 
         if srs_db.resume_streaming(payload.ip.clone(), &secret, payload.app.clone(), payload.stream.clone()) {
             tracing::debug!("推流者 ({}) 恢复推流", payload.ip);
@@ -162,7 +162,7 @@ async fn handle_on_publish(
         }
     } else {
         // 新推流
-        let mut srs_db = state.srs_db.write();
+        let mut srs_db = state.srs_db.inner.write();
 
         // 验证密钥
         if srs_db.verify_streamer(&secret) {
@@ -183,7 +183,7 @@ async fn handle_on_publish(
             }
 
             // 重置聊天室数据库
-            state.chat_db.write().reset();
+            state.chat_db.inner.write().reset();
 
             srs_success_response()
         } else {
@@ -214,30 +214,33 @@ async fn handle_on_play(
         .cloned()
         .unwrap_or_default();
 
-    let srs_db = state.srs_db.read();
+    let srs_db = state.srs_db.inner.read();
 
-    // 检查客户端是否已注册
-    if !srs_db.has_client(&payload.ip, &session_id) {
-        tracing::debug!("SRS 回调拒绝: 客户端未注册");
-        return srs_forbidden_response();
-    }
+    // 检查客户端是否已注册（只检查 session_id，因为 SRS 回调的 IP 是 Docker 内部 IP）
+    let client_status = srs_db.get_client_status_any_ip(&session_id);
 
-    // 检查客户端状态
-    let client_status = srs_db.get_client_status(&payload.ip, &session_id);
+    let (client_ip, client_status) = match client_status {
+        Some((ip, status)) => (ip, status),
+        None => {
+            tracing::debug!("SRS 回调拒绝: 客户端未注册 session_id={}", session_id);
+            return srs_forbidden_response();
+        }
+    };
+
     drop(srs_db);
 
     match client_status {
-        Some(ClientStatus::Pending) | Some(ClientStatus::Nil) => {
+        ClientStatus::Pending | ClientStatus::Nil => {
             // 待答题或被封禁，不允许拉流
-            tracing::debug!("SRS 回调拒绝: 客户端未获得许可");
+            tracing::debug!("SRS 回调拒绝: 客户端未获得许可 session_id={}", session_id);
             return srs_forbidden_response();
         }
         _ => {}
     }
 
     // 更新客户端状态为 Playing
-    let mut srs_db = state.srs_db.write();
-    srs_db.update_client_activity(&payload.ip, &session_id, ClientStatus::Playing);
+    let mut srs_db = state.srs_db.inner.write();
+    srs_db.update_client_activity(&client_ip, &session_id, ClientStatus::Playing);
 
     srs_success_response()
 }
@@ -252,7 +255,7 @@ async fn handle_on_unpublish(
     state: Arc<crate::state::AppState>,
     payload: SrsCallbackRequest,
 ) -> Response {
-    let mut srs_db = state.srs_db.write();
+    let mut srs_db = state.srs_db.inner.write();
     srs_db.pause_streaming();
     tracing::debug!("推流者 ({}) 停止推流", payload.ip);
     srs_success_response()
@@ -272,7 +275,7 @@ async fn handle_on_stop(
     let queries = parse_param(&payload.param);
     let session_id = queries.get("session_id").or_else(|| queries.get("rid")).cloned();
 
-    let mut srs_db = state.srs_db.write();
+    let mut srs_db = state.srs_db.inner.write();
 
     // 如果客户端存在，更新状态为 Resting
     if session_id.is_some() && srs_db.has_client(&payload.ip, session_id.as_deref().unwrap_or("")) {

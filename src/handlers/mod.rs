@@ -10,8 +10,10 @@
 pub mod api;   // API 处理器模块
 pub mod chat;  // 聊天室处理器模块
 pub mod srs;   // SRS 回调处理器模块
+pub mod streaming_info;
 
 // 导出公共处理器函数，供 main.rs 中使用
 pub use api::{api_handler};           // API 请求主处理器
 pub use chat::{chat_handler};         // 聊天室请求处理器
 pub use srs::{srs_callback_handler};  // SRS 回调处理器
+pub use streaming_info::{streaming_info_handler};  // SRS 回调处理器

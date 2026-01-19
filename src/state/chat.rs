@@ -4,12 +4,12 @@
 //! 支持消息的时间戳排序、用户去重、聊天记录转储等。
 
 use chrono::{DateTime, Utc};
-use parking_lot::RwLock;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::PathBuf;
+use parking_lot::RwLock;
 use std::sync::Arc;
 
 // ============================================================================
@@ -281,16 +281,18 @@ impl ChatDatabaseInner {
         }
 
         // 找到时间戳位置
-        let idx = self.messages.partition_point(|e| e.stamp <= stamp);
-
+        
         if prev {
+            let idx = self.messages.partition_point(|e| e.stamp < stamp);
             // 获取之前的 10 条消息
             let start = if idx >= 10 { idx - 10 } else { 0 };
             self.messages[start..idx].to_vec()
         } else {
-            // 获取之后的所有消息
+            let idx = self.messages.partition_point(|e| e.stamp <= stamp);
+            // 获取之后的所有消息（严格大于 stamp，避免重复）
+            // 注意：这里使用 idx + 1，跳过等于 stamp 的消息
             if idx < self.messages.len() {
-                self.messages[idx + 1..].to_vec()
+                self.messages[idx..].to_vec()
             } else {
                 Vec::new()
             }
@@ -383,86 +385,21 @@ impl ChatDatabaseInner {
 }
 
 // ============================================================================
-// 流信息结构体
+// 聊天数据库包装器
 // ============================================================================
 
-/// 流信息统计
-///
-/// 用于从 SRS API 获取观众人数信息
-pub struct StreamingInfo {
-    /// 当前观众人数（-1 表示未知）
-    pub audiences: i32,
-    /// 后台任务是否活跃
-    pub active: Arc<RwLock<bool>>,
+/// 聊天数据库包装器
+#[derive(Clone)]
+pub struct ChatDatabase {
+    /// 内部数据库
+    pub inner: Arc<RwLock<ChatDatabaseInner>>,
 }
 
-impl StreamingInfo {
-    /// 创建新的流信息对象
-    pub fn new() -> Self {
+impl ChatDatabase {
+    /// 创建新的聊天数据库
+    pub fn new(dump_path: PathBuf) -> Self {
         Self {
-            audiences: -1,
-            active: Arc::new(RwLock::new(true)),
-        }
-    }
-
-    /// 获取当前观众人数
-    pub fn get_audiences(&self) -> i32 {
-        self.audiences
-    }
-
-    /// 从 SRS API 获取观众人数
-    ///
-    /// ### 参数
-    /// - `srs_api_url`: SRS API 地址（如 http://localhost:1985）
-    ///
-    /// ### 行为说明
-    /// 1. 请求 SRS 的 `/api/v1/clients/` 接口
-    /// 2. 获取当前连接的客户端数量
-    /// 3. 减去 1（排除推流端）得到观众人数
-    pub async fn tick(&mut self, srs_api_url: &str) {
-        let api_url = format!("{}/api/v1/clients/", srs_api_url);
-
-        match reqwest::get(&api_url).await {
-            Ok(resp) => {
-                if resp.status().is_success() {
-                    if let Ok(json) = resp.json::<serde_json::Value>().await {
-                        if let Some(clients) = json.get("clients").and_then(|c| c.as_array()) {
-                            // 减去 1 排除推流端
-                            self.audiences = clients.len().saturating_sub(1) as i32;
-                        }
-                    }
-                } else {
-                    tracing::warn!("GET from {}, received response but status is not success", api_url);
-                    self.audiences = -1;
-                }
-            }
-            Err(e) => {
-                tracing::warn!("GET from {} error: {}", api_url, e);
-                self.audiences = -1;
-            }
-        }
-    }
-
-    /// 启动后台统计任务
-    ///
-    /// ### 参数
-    /// - `srs_api_url`: SRS API 地址
-    ///
-    /// ### 行为说明
-    /// 每 5 秒从 SRS API 获取一次观众人数
-    pub async fn spin(&mut self, srs_api_url: String) {
-        let active = self.active.clone();
-        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(5));
-
-        loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    self.tick(&srs_api_url).await;
-                }
-                _ = tokio::signal::ctrl_c() => {
-                    break;
-                }
-            }
+            inner: Arc::new(RwLock::new(ChatDatabaseInner::new(dump_path))),
         }
     }
 }

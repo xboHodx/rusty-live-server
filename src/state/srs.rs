@@ -386,6 +386,17 @@ impl SrsDatabaseInner {
         self.get_client(ip, session_id).map(|r| r.status)
     }
 
+    /// 获取客户端状态（通过 session_id，忽略 IP）
+    /// 用于 SRS 回调，因为回调中的 IP 是 Docker 内部 IP
+    pub fn get_client_status_any_ip(&self, session_id: &str) -> Option<(String, ClientStatus)> {
+        for (ip, clients) in self.clients.iter() {
+            if let Some(client) = clients.get(session_id) {
+                return Some((ip.clone(), client.status));
+            }
+        }
+        None
+    }
+
     /// 更新客户端活动和状态
     ///
     /// ### 返回值
@@ -544,11 +555,10 @@ impl SrsDatabaseInner {
 /// SRS 数据库包装器
 ///
 /// 提供后台任务支持
+#[derive(Clone)]
 pub struct SrsDatabase {
     /// 内部数据库
     pub inner: Arc<RwLock<SrsDatabaseInner>>,
-    /// 后台任务是否活跃
-    pub active: Arc<RwLock<bool>>,
 }
 
 impl SrsDatabase {
@@ -556,7 +566,6 @@ impl SrsDatabase {
     pub fn new(secret_path: PathBuf) -> Result<Self, Box<dyn std::error::Error>> {
         Ok(Self {
             inner: Arc::new(RwLock::new(SrsDatabaseInner::new(secret_path)?)),
-            active: Arc::new(RwLock::new(true)),
         })
     }
 
@@ -599,19 +608,6 @@ impl SrsDatabase {
 
     /// 启动后台 tick 任务
     pub async fn spin(&self) {
-        let active = self.active.clone();
-        let inner = self.inner.clone();
-
-        tokio::spawn(async move {
-            while *active.read() {
-                {
-                    let db = inner.read();
-                    // 释放读锁
-                    drop(db);
-                }
-                // 实际的 tick 操作通过 inner.write() 完成
-                // 这里是简化版本，实际 tick 在 main.rs 中实现
-            }
-        });
+        // 暂无实现，tick 由 main.rs 中的定时任务处理
     }
 }
